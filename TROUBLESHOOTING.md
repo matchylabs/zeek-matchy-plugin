@@ -150,31 +150,29 @@ warning: Failed to open Matchy database: /path/to/db.mxy
 
 4. **Use an absolute path in your Zeek script:**
    ```zeek
-   Matchy::load_database("db", "/absolute/path/to/db.mxy");
+   local db = Matchy::load_database("/absolute/path/to/db.mxy");
    ```
 
-### "Matchy database 'name' not found" when querying
+### Database handle is invalid after load
 
-**Warning:**
-```
-warning: Matchy database 'mydb' not found
-```
-
-**Solution:**
-
-Make sure you loaded the database first:
+**Check:**
 ```zeek
-event zeek_init() {
-    if (!Matchy::load_database("mydb", "path/to/db.mxy")) {
-        print "Failed to load database!";
-        return;
-    }
+local db = Matchy::load_database("path/to/db.mxy");
+if (!Matchy::is_valid(db)) {
+    print "Failed to load database!";
 }
+```
 
-event connection_new(c: connection) {
-    # Now queries will work
-    local result = Matchy::query_ip("mydb", c$id$orig_h);
-}
+### Using MatchyIntel Framework
+
+If using the MatchyIntel framework, set the path option:
+```zeek
+redef MatchyIntel::db_path = "/path/to/db.mxy";
+```
+
+Change at runtime:
+```zeek
+Config::set_value("MatchyIntel::db_path", "/new/path/to/db.mxy");
 ```
 
 ## Testing Issues

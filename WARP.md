@@ -7,10 +7,12 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 Zeek Matchy Plugin - A Zeek plugin for high-performance IP address and string pattern matching using Matchy databases (written in Rust). Provides BiF (Built-in Function) implementations for loading `.mxy` databases and querying them from Zeek scripts.
 
 **Core components:**
-- `src/Plugin.{h,cc}` - Zeek plugin registration and configuration
+- `src/Plugin.{h,cc}` - Zeek plugin registration, opaque type (MatchyDB) definition
 - `src/matchy.bif` - Built-in Function definitions that bridge Zeek and Matchy C API
-- `scripts/main.zeek` - Zeek script namespace definitions
-- Global state management: Uses a C++ `std::map<std::string, matchy_t*>` to track loaded databases by name
+- `scripts/main.zeek` - Low-level BiF documentation
+- `scripts/intel/` - MatchyIntel framework (Intel Framework replacement)
+  - `main.zeek` - Core types, seen() function, match event, logging
+  - `seen/*.zeek` - Observation scripts for DNS, HTTP, SSL, connections
 
 ## Build System
 
@@ -97,14 +99,15 @@ function bif_name%(args%): return_type
 ```
 
 ### Database Lifecycle
-1. **Load:** `matchy_open()` opens `.mxy` file via memory mapping → stored in global `databases` map
-2. **Query:** `matchy_query()` returns results → converted to JSON via `matchy_result_to_json()`
-3. **Unload:** `matchy_close()` frees resources → removed from map
+1. **Load:** `Matchy::load_database()` calls `matchy_open()` → returns opaque MatchyDB handle
+2. **Query:** `Matchy::query_ip()` / `query_string()` → JSON result string
+3. **Cleanup:** Automatic via Zeek's garbage collection when handle goes out of scope
 
 ### Memory Management
-- Matchy results: Must call `matchy_free_result()` and `matchy_free_string()` after use
+- Opaque MatchyDB type wraps `matchy_t*` pointer
+- Destructor (`~MatchyDB()`) calls `matchy_close()` automatically
+- Matchy results: BiF code calls `matchy_free_result()` and `matchy_free_string()` before returning
 - Zeek values: Use `zeek::make_intrusive<>` for ref-counted types
-- Database handles: Stored in global `std::map` until explicitly unloaded
 
 ## Common Development Tasks
 
@@ -129,15 +132,31 @@ zeek -N Matchy::DB  # Should show: "Matchy::DB - Fast IP and pattern matching...
 
 All functions are in the `Matchy::` namespace:
 
-- `load_database(db_name: string, filename: string): bool` - Load `.mxy` database
-- `query_ip(db_name: string, ip: addr): string` - Query by IP, returns JSON or ""
-- `query_string(db_name: string, query: string): string` - Query by string/pattern, returns JSON or ""
-- `unload_database(db_name: string): bool` - Unload database and free resources
+- `load_database(filename: string): opaque of MatchyDB` - Load `.mxy` database, returns handle
+- `is_valid(db: opaque of MatchyDB): bool` - Check if handle is valid
+- `query_ip(db: opaque of MatchyDB, ip: addr): string` - Query by IP, returns JSON or ""
+- `query_string(db: opaque of MatchyDB, query: string): string` - Query by string/pattern, returns JSON or ""
 
 **Return value conventions:**
-- Boolean functions: `zeek::val_mgr->True()` / `zeek::val_mgr->False()`
-- String functions: `zeek::make_intrusive<zeek::StringVal>("")` for empty/error
-- Query functions return JSON strings on match, empty string on no-match/error
+- `load_database`: Returns opaque handle or nullptr on failure
+- `is_valid`: `zeek::val_mgr->True()` / `zeek::val_mgr->False()`
+- Query functions: JSON string on match, empty string on no-match/error
+
+## MatchyIntel Framework
+
+High-level Intel Framework replacement in `scripts/intel/`:
+
+- `MatchyIntel::db_path` option - Path to database (supports runtime changes)
+- `MatchyIntel::seen(s: Seen)` - Check indicator against database
+- `MatchyIntel::match` event - Fires on hits with JSON metadata
+- `MatchyIntel::seen_policy` hook - Filter/suppress matches
+- `MatchyIntel::extend_match` hook - Customize logging
+
+**Observation scripts** automatically check:
+- Connection IPs (`conn.zeek`)
+- DNS queries (`dns.zeek`)
+- HTTP URLs and Host headers (`http.zeek`)
+- SSL/TLS SNI and certificate CNs (`ssl.zeek`)
 
 ## Dependencies
 

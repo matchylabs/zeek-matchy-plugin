@@ -11,6 +11,8 @@ A Zeek plugin for high-performance IP address and string pattern matching using 
 - [Why Matchy?](#why-matchy)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [MatchyIntel Framework](#matchyintel-framework-intel-framework-replacement)
+  - [Low-Level API](#low-level-api)
 - [API Reference](#api-reference)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -126,10 +128,86 @@ EOF
 matchy build threats.csv -o threats.mxy --format csv
 ```
 
-### Basic Zeek Script
+### MatchyIntel Framework (Intel Framework Replacement)
+
+The plugin includes **MatchyIntel**, a drop-in replacement for Zeek's Intel Framework that uses Matchy for high-performance matching. It automatically observes DNS queries, connection IPs, HTTP URLs, SSL/TLS SNI, and more.
+
+#### Quick Start
 
 ```zeek
-global threats_db: opaque of Matchy::MatchyDB;
+@load Matchy/DB/intel
+
+# Point to your threat intelligence database
+redef MatchyIntel::db_path = "/opt/threat-intel/threats.mxy";
+
+# React to matches
+event MatchyIntel::match(s: MatchyIntel::Seen, metadata: string) {
+    print fmt("THREAT: %s (%s) -> %s", s$indicator, s$where, metadata);
+}
+```
+
+That's it! The framework will automatically check all DNS queries, connection IPs, HTTP hosts/URLs, and SSL SNI against your database.
+
+#### Runtime Database Switching
+
+You can change the database at runtime without restarting Zeek:
+
+```zeek
+# Switch to a different database
+Config::set_value("MatchyIntel::db_path", "/opt/threat-intel/updated.mxy");
+
+# Unload the database (stop matching)
+Config::set_value("MatchyIntel::db_path", "");
+```
+
+If the new path is invalid, the change is rejected and the current database stays loaded.
+
+#### Manual Observation
+
+You can also manually check indicators:
+
+```zeek
+# Check an IP
+MatchyIntel::seen(MatchyIntel::Seen($host=1.2.3.4,
+                                    $where=MatchyIntel::IN_ANYWHERE));
+
+# Check a domain
+MatchyIntel::seen(MatchyIntel::Seen($indicator="evil.example.com",
+                                    $indicator_type=MatchyIntel::DOMAIN,
+                                    $where=MatchyIntel::IN_ANYWHERE));
+```
+
+#### Hooks and Customization
+
+```zeek
+# Filter matches before they fire
+hook MatchyIntel::seen_policy(s: MatchyIntel::Seen, found: bool) {
+    # Suppress matches for internal IPs
+    if (s?$host && Site::is_local_addr(s$host))
+        break;
+}
+
+# Customize logging
+hook MatchyIntel::extend_match(info: MatchyIntel::Info, s: MatchyIntel::Seen, metadata: string) {
+    # Add custom fields, modify info record, etc.
+}
+```
+
+#### Log Output
+
+Matches are logged to `matchy_intel.log` with fields including:
+- `ts`, `uid`, `id` - Connection context
+- `seen.indicator`, `seen.indicator_type`, `seen.where` - What was seen
+- `metadata` - JSON blob from your database
+
+---
+
+### Low-Level API
+
+For more control, use the raw BiF functions directly:
+
+```zeek
+global threats_db: opaque of MatchyDB;
 
 event zeek_init() {
     # Load the database - returns an opaque handle
@@ -165,7 +243,7 @@ event dns_request(c: connection, msg: dns_msg, query: string, qtype: count, qcla
 # Database is automatically cleaned up when Zeek terminates
 ```
 
-### Advanced Example with JSON Parsing
+### Advanced Example with JSON Parsing (Low-Level API)
 
 ```zeek
 @load base/frameworks/notice
@@ -184,7 +262,7 @@ export {
         description: string &optional;
     };
     
-    global threats_db: opaque of Matchy::MatchyDB;
+    global threats_db: opaque of MatchyDB;
 }
 
 event zeek_init() {

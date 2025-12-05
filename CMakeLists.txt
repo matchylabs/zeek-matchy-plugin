@@ -131,6 +131,14 @@ zeek_plugin_bif(src/matchy.bif)
 zeek_plugin_scripts(
     scripts/__load__.zeek
     scripts/main.zeek
+    scripts/intel/__load__.zeek
+    scripts/intel/main.zeek
+    scripts/intel/seen/__load__.zeek
+    scripts/intel/seen/where-locations.zeek
+    scripts/intel/seen/conn.zeek
+    scripts/intel/seen/dns.zeek
+    scripts/intel/seen/http.zeek
+    scripts/intel/seen/ssl.zeek
 )
 
 zeek_plugin_dist_files(README.md VERSION LICENSE)
